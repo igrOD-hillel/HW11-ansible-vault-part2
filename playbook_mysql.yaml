@@ -1,0 +1,143 @@
+- name: First ansible playbook
+  hosts: AWS
+  become: yes
+
+  tasks:
+    - name: Update all packages
+      yum:
+        name: '*'
+        state: latest
+        update_only: yes
+
+    - name: Install amazon extras
+      yum:
+        name:
+          - amazon-linux-extras
+        state: latest
+        update_cache: yes
+      
+    - name: Add extras repository
+      shell: yum-config-manager --enable extras
+
+    - name: Enable Some packages from amazon-linux-extras packages
+      shell: "amazon-linux-extras enable python3.8 ansible2 docker"
+
+    - name: clean yum metadata cache
+      command: yum clean metadata
+      args:
+        warn: false
+
+    - name: Ensure a list of yum packages are installed
+      yum:
+        name: "{{ packages }}"
+        state: latest
+        update_cache: yes
+      vars:
+        packages:
+        - python-pip
+        - yum-utils
+        - python3.8
+        - ansible
+        - docker
+        - git
+
+    - name: Enable Docker CE service at startup
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # - name: Upgrade pip3
+    #   shell: "python3.8 -m pip install pip --upgrade"
+
+    - name: Ensure Python pip packages are installed
+      pip:
+        extra_args: --upgrade
+        name: "{{ packages }}"
+        executable: /usr/local/bin/pip3.8
+      vars:
+        packages:
+        - PyMySQL
+        - docker
+        - docker-compose
+        
+    - name: Add user to docker group
+      user:
+        name: "ec2-user"
+        groups: docker
+        append: yes
+
+    - name: Copy compose file
+      copy:
+        src: /home/admin4ik/Documents/test/docker-compose.yaml
+        dest: /home/ec2-user/mysql/
+        owner: "ec2-user"
+        group: docker
+        mode: 0644
+
+    - name: Copy docker env
+      copy:
+        src: /home/admin4ik/Documents/test/.env
+        dest: /home/ec2-user/mysql/
+        owner: "ec2-user"
+        group: docker
+        mode: 0644
+
+    - name: Run Docker compose file
+      community.docker.docker_compose:
+        project_src: /home/ec2-user/mysql/
+
+    - name: Remove docker .env file
+      ansible.builtin.file:
+        path: /home/ec2-user/mysql/.env
+        state: absent
+
+    - name: Waiting when MySQL server is start
+      wait_for:
+        port: "3306"
+        host: "localhost"
+        delay: 15
+        timeout: 30
+        state: started
+        msg: "Some ERROR"
+
+    - name: Create database user
+      mysql_user:
+        login_user: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          33613738336261646438656331633432646634393535306631666264613932653466646338356565
+          3330386536363966333666633538383138663766373635340a396262663430336131366363393063
+          30366361383638393162636532316330646234616561306463303730646632666534653031636164
+          3237373735663335630a313431393236386632616637643864373364386539636539353839313335
+          6537
+        login_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          38653331383566346232323932386163303463666463333662613764363633303536653965356663
+          6361336263633163333135363039643335373764306362350a613331373131613733646662363838
+          39613735303561643935313938336434363936626533643030353464343062343734393332383466
+          3963326462376163650a346534306563643938336530613766643533306262326339313265343330
+          3438
+        name: ihor
+        password: password123
+        host: "localhost"
+        priv: "*.*:ALL"
+        check_implicit_admin: true
+
+    - name: Create a new database with name 'dev_db'
+      mysql_db:
+        login_user: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          33613738336261646438656331633432646634393535306631666264613932653466646338356565
+          3330386536363966333666633538383138663766373635340a396262663430336131366363393063
+          30366361383638393162636532316330646234616561306463303730646632666534653031636164
+          3237373735663335630a313431393236386632616637643864373364386539636539353839313335
+          6537
+        login_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          38653331383566346232323932386163303463666463333662613764363633303536653965356663
+          6361336263633163333135363039643335373764306362350a613331373131613733646662363838
+          39613735303561643935313938336434363936626533643030353464343062343734393332383466
+          3963326462376163650a346534306563643938336530613766643533306262326339313265343330
+          3438
+        name: new_db
+        state: present
